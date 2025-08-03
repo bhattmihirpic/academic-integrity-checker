@@ -4,16 +4,34 @@ import torch
 from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
 
 class AIDetector:
-    """This is our AI content detective!"""
+    """AI content detective with adjustable sensitivity."""
 
-    def __init__(self):
-        """Set up our AI detective"""
+    def __init__(
+        self,
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        max_tokens=512,
+        stride=50,
+        ai_weight=0.7,
+        pattern_weight=0.3,
+        high_threshold=80,
+        medium_threshold=60
+    ):
+        """
+        ai_weight/pattern_weight: weights for smart vs pattern analysis.
+        high_threshold/medium_threshold: score cutoffs for confidence.
+        """
+        self.max_tokens = max_tokens
+        self.stride = stride
+        self.ai_weight = ai_weight
+        self.pattern_weight = pattern_weight
+        self.high_threshold = high_threshold
+        self.medium_threshold = medium_threshold
+
         self.ai_model = None
         self.model_working = False
 
         try:
             print("🤖 Loading AI detection model...")
-            model_name = "sentence-transformers/all-MiniLM-L6-v2"
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
             model = AutoModelForSequenceClassification.from_pretrained(model_name)
             self.ai_model = pipeline(
@@ -30,13 +48,12 @@ class AIDetector:
             print("Will use pattern-based detection instead")
 
     def look_for_ai_patterns(self, text):
-        """Look for patterns that suggest AI wrote this"""
         if not text:
             return {'ai_score': 0.0, 'clues_found': []}
 
         text_lower = text.lower()
-        clues_found = []
         ai_score = 0.0
+        clues = []
 
         ai_phrases = {
             'as an ai': 30,
@@ -54,45 +71,42 @@ class AIDetector:
             count = text_lower.count(phrase)
             if count > 0:
                 ai_score += points * count
-                clues_found.append(f"Uses '{phrase}' {count} time(s) - AI tools love this phrase!")
+                clues.append(f"Uses '{phrase}' {count} time(s) - AI tools love this phrase!")
 
         sentences = [s.strip() for s in text.split('.') if s.strip()]
         if len(sentences) > 3:
-            sentence_lengths = [len(s.split()) for s in sentences]
-            avg_length = sum(sentence_lengths) / len(sentence_lengths)
-            if avg_length > 20 and all(abs(length - avg_length) < 5 for length in sentence_lengths):
+            lengths = [len(s.split()) for s in sentences]
+            avg = sum(lengths) / len(lengths)
+            if avg > 20 and all(abs(l - avg) < 5 for l in lengths):
                 ai_score += 15
-                clues_found.append(f"All sentences are suspiciously similar length (avg: {avg_length:.1f} words)")
+                clues.append(f"All sentences are suspiciously similar length (avg: {avg:.1f} words)")
 
         transition_words = ['however', 'furthermore', 'moreover', 'consequently', 'therefore', 'nevertheless']
-        transition_count = sum(text_lower.count(word) for word in transition_words)
+        transition_count = sum(text_lower.count(w) for w in transition_words)
         if transition_count > len(sentences) * 0.3:
             ai_score += 12
-            clues_found.append(f"Uses too many fancy transition words ({transition_count} found)")
+            clues.append(f"Uses too many fancy transition words ({transition_count} found)")
 
-        ai_percentage = min(100.0, ai_score)
-        return {'ai_score': ai_percentage, 'clues_found': clues_found}
+        return {'ai_score': min(100.0, ai_score), 'clues_found': clues}
 
     def use_smart_ai_model(self, text):
-        """Use the smart AI detection model if available"""
+        """Use the smart AI detection model if available."""
         if not self.model_working or not text:
             return None
 
         try:
-            # Tokenizer-driven chunking with overflow handling
             encoding = self.tokenizer(
                 text,
                 return_overflowing_tokens=True,
                 truncation=True,
-                max_length=512,
-                stride=50,
+                max_length=self.max_tokens,
+                stride=self.stride,
                 padding="max_length",
                 return_tensors="pt"
             )
 
-            chunk_ai_scores = []
-            chunk_details = []
             total_score = 0.0
+            chunk_details = []
 
             for i in range(encoding.input_ids.size(0)):
                 input_ids = encoding.input_ids[i].unsqueeze(0)
@@ -100,9 +114,10 @@ class AIDetector:
 
                 outputs = self.ai_model.model(input_ids=input_ids, attention_mask=attention_mask)
                 logits = outputs.logits
+
+                # Detach before converting to NumPy
                 probs = torch.softmax(logits, dim=-1).detach().cpu().numpy()[0]
 
-                # Assume label 1 = AI, label 0 = human; adjust indices per model
                 ai_prob = float(probs[1]) * 100
                 total_score += ai_prob
 
@@ -124,7 +139,7 @@ class AIDetector:
             return None
 
     def detect_ai_content(self, text):
-        """Main function to detect if AI wrote this text"""
+        """Main function to detect if AI wrote this text."""
         if not text or len(text.strip()) < 50:
             return {
                 'ai_probability': 0.0,
@@ -137,15 +152,15 @@ class AIDetector:
         pattern_result = self.look_for_ai_patterns(text)
 
         if smart_result:
-            final_score = (smart_result['ai_score'] * 0.7) + (pattern_result['ai_score'] * 0.3)
+            final_score = (smart_result['ai_score'] * self.ai_weight) + (pattern_result['ai_score'] * self.pattern_weight)
             method_used = "Smart AI model + Pattern analysis"
         else:
             final_score = pattern_result['ai_score']
             method_used = "Pattern analysis only"
 
-        if final_score > 80:
+        if final_score > self.high_threshold:
             confidence = 'high'
-        elif final_score > 60:
+        elif final_score > self.medium_threshold:
             confidence = 'medium'
         else:
             confidence = 'low'

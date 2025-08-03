@@ -1,0 +1,10 @@
+ai:
+  ai_weight: 0.7
+  high_threshold: 85
+  max_tokens: 512
+  medium_threshold: 65
+  model_name: sentence-transformers/all-MiniLM-L6-v2
+  pattern_weight: 0.3
+  stride: 50
+plagiarism:
+  threshold: 0.6
