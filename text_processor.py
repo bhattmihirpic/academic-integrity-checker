@@ -1,81 +1,86 @@
 import fitz  # This helps read PDF files
 from docx import Document  # This helps read Word documents
 import os
+import re
 
 def extract_text_from_file(file_path):
-    """This function takes a file and pulls out all the text from it"""
+    """Detect file type and dispatch to correct reader"""
+    ext = os.path.splitext(file_path)[1].lower()
     
-    # First, let's figure out what type of file it is
-    if file_path.lower().endswith('.pdf'):
+    if ext == '.pdf':
         return read_pdf_file(file_path)
-    elif file_path.lower().endswith('.docx'):
+    elif ext == '.docx':
         return read_word_file(file_path)
-    else:
+    elif ext in ['.txt', '.text']:
         return read_text_file(file_path)
+    else:
+        raise ValueError(f"Unsupported file extension: {ext}")
 
 def read_pdf_file(file_path):
-    """Read text from a PDF file"""
+    """Read text from a PDF file using PyMuPDF (fitz)"""
     try:
-        doc = PyMuPDF.open(file_path)
+        doc = fitz.open(file_path)  # ✅ Correct usage of PyMuPDF
         text = ""
         
-        # Go through each page and get the text
-        for page_num in range(len(doc)):
-            page = doc.load_page(page_num)
+        for page in doc:
             text += page.get_text()
-            text += "\n"  # Add a line break between pages
+            text += "\n"
         
         doc.close()
         return text.strip()
     except Exception as e:
-        return f"Sorry, I couldn't read this PDF file: {str(e)}"
+        return f"[PDF ERROR] Unable to extract text: {str(e)}"
 
 def read_word_file(file_path):
-    """Read text from a Word document"""
+    """Read text from a Word (.docx) file"""
     try:
         doc = Document(file_path)
         text = []
-        
-        # Go through each paragraph
+
         for paragraph in doc.paragraphs:
-            if paragraph.text.strip():  # Only add paragraphs that have text
+            if paragraph.text.strip():
                 text.append(paragraph.text)
         
         return '\n'.join(text)
     except Exception as e:
-        return f"Sorry, I couldn't read this Word document: {str(e)}"
+        return f"[DOCX ERROR] Unable to extract text: {str(e)}"
 
 def read_text_file(file_path):
-    """Read text from a simple text file"""
+    """Read plain text from a .txt file"""
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
             return file.read()
     except Exception as e:
-        return f"Sorry, I couldn't read this text file: {str(e)}"
+        return f"[TXT ERROR] Unable to read text file: {str(e)}"
 
 def clean_up_text(text):
-    """Make the text easier to analyze by cleaning it up"""
-    import re
+    """Clean raw text: remove extra whitespace and unwanted characters"""
+    if not text:
+        return ""
     
-    # Remove extra spaces
+    # Remove redundant whitespace (newlines, multiple spaces)
     text = re.sub(r'\s+', ' ', text)
-    
-    # Remove weird characters but keep important punctuation
-    text = re.sub(r'[^\w\s\.\,\!\?\;\:\-\(\)]', '', text)
-    
+    # Keep letters, numbers, and basic punctuation
+    text = re.sub(r'[^\w\s.,!?;:\-\(\)]', '', text)
+
     return text.strip()
 
 def get_text_info(text):
-    """Get some basic information about the text"""
+    """Return character, word, sentence stats from cleaned text"""
     if not text:
-        return {}
-    
+        return {
+            'total_characters': 0, 
+            'total_words': 0, 
+            'total_sentences': 0, 
+            'average_words_per_sentence': 0
+        }
+
     words = text.split()
-    sentences = text.split('.')
-    
+    sentences = re.split(r'[.!?]', text)
+
     return {
         'total_characters': len(text),
         'total_words': len(words),
         'total_sentences': len([s for s in sentences if s.strip()]),
-        'average_words_per_sentence': len(words) / max(len(sentences), 1)
+        'average_words_per_sentence': round(len(words) / max(len(sentences), 1), 2)
     }
