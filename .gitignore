@@ -1,0 +1,10 @@
+# Don't upload these - they're either too big, private, or unnecessary
+__pycache__/
+*.pyc
+integrity_env/
+*.db
+uploads/
+test_documents/
+.DS_Store
+*.log
+.env
