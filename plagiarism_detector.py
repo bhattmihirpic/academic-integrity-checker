@@ -1,134 +1,174 @@
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+# plagiarism_detector.py
+
+import os
 import re
+import pickle
+import numpy as np
+import faiss
+import torch.multiprocessing as mp
+
+# Prevent semaphore leaks on macOS
+mp.set_sharing_strategy('file_system')
+
+# Disable Hugging Face tokenizers parallelism to avoid subprocesses
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+# Disable OpenMP in FAISS and NumPy/BLAS to prevent threaded resource leaks
+faiss.omp_set_num_threads(1)
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+
+from sentence_transformers import SentenceTransformer
+from text_processor import extract_text_from_file, clean_up_text
 
 class PlagiarismDetector:
-    """This is our plagiarism detective!"""
-    
-    def __init__(self):
-        """Set up our detective with the right tools"""
-        
-        # This tool helps us compare texts by looking at important words
-        self.text_analyzer = TfidfVectorizer(
-            max_features=1000,  # Look at the 1000 most important words
-            stop_words='english',  # Ignore common words like "the", "and", "is"
-            ngram_range=(1, 3)  # Look at single words, pairs, and triplets
-        )
-        
-        # Some example texts to compare against
-        self.reference_texts = [
-            "Academic integrity is important in education. Students should do their own work.",
-            "The scientific method involves observation, hypothesis, and experimentation.",
-            "Climate change is caused by human activities and greenhouse gases.",
-            "Technology has changed how we communicate and learn."
-        ]
-    
-    def clean_text_for_analysis(self, text):
-        """Clean up text to make it better for comparison"""
-        if not text:
-            return ""
-        
-        # Make everything lowercase
-        text = text.lower()
-        
-        # Remove citations like (Smith, 2020)
-        text = re.sub(r'\([^)]*\d{4}[^)]*\)', '', text)
-        
-        # Remove extra spaces
-        text = re.sub(r'\s+', ' ', text)
-        
-        return text.strip()
-    
-    def compare_two_texts(self, text1, text2):
-        """Compare two pieces of text and give a similarity score"""
-        try:
-            # Clean up both texts
-            clean_text1 = self.clean_text_for_analysis(text1)
-            clean_text2 = self.clean_text_for_analysis(text2)
-            
-            # Use our analyzer to compare them
-            texts = [clean_text1, clean_text2]
-            text_vectors = self.text_analyzer.fit_transform(texts)
-            
-            # Calculate similarity (0 = completely different, 1 = identical)
-            similarity = cosine_similarity(text_vectors)
-            
-            # Convert to percentage
-            return similarity[0][1] * 100
-            
-        except Exception as e:
-            print(f"Error comparing texts: {e}")
-            return 0.0
-    
-    def find_suspicious_parts(self, text1, text2):
-        """Find specific parts that look copied"""
-        # Split texts into sentences
-        sentences1 = [s.strip() for s in text1.split('.') if s.strip()]
-        sentences2 = [s.strip() for s in text2.split('.') if s.strip()]
-        
-        suspicious_parts = []
-        
-        # Compare each sentence from text1 with sentences from text2
-        for i, sentence1 in enumerate(sentences1):
-            if len(sentence1.split()) < 5:  # Skip very short sentences
-                continue
-                
-            for j, sentence2 in enumerate(sentences2):
-                if len(sentence2.split()) < 5:
-                    continue
-                
-                similarity = self.compare_two_texts(sentence1, sentence2)
-                
-                if similarity > 70:  # If sentences are more than 70% similar
-                    suspicious_parts.append({
-                        'sentence_from_submitted_text': sentence1,
-                        'similar_sentence_found': sentence2,
-                        'similarity_percentage': round(similarity, 1),
-                        'position_in_text': i
-                    })
-        
-        # Sort by most similar first
-        suspicious_parts.sort(key=lambda x: x['similarity_percentage'], reverse=True)
-        
-        return suspicious_parts[:10]  # Return top 10 most suspicious parts
-    
-    def check_for_plagiarism(self, submitted_text):
-        """Check if submitted text looks like it was copied"""
-        
-        if not submitted_text or len(submitted_text.strip()) < 50:
-            return {
-                'overall_score': 0.0,
-                'confidence': 'low',
-                'suspicious_parts': [],
-                'message': 'Text too short to analyze properly'
-            }
-        
-        max_similarity = 0.0
-        all_suspicious_parts = []
-        
-        # Compare against all our reference texts
-        for reference_text in self.reference_texts:
-            similarity = self.compare_two_texts(submitted_text, reference_text)
-            
-            if similarity > max_similarity:
-                max_similarity = similarity
-            
-            # Find suspicious parts if similarity is high enough
-            if similarity > 30:
-                parts = self.find_suspicious_parts(submitted_text, reference_text)
-                all_suspicious_parts.extend(parts)
-        
-        # Determine confidence level
-        if max_similarity > 80:
-            confidence = 'high'
-        elif max_similarity > 50:
-            confidence = 'medium'  
+    """Enhanced plagiarism detector using semantic embeddings + FAISS."""
+
+    def __init__(
+        self,
+        ref_folder="reference_texts",
+        index_path="plag_index.faiss",
+        mapping_path="mapping.pkl",
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    ):
+        """Initialize embedding model, build or load FAISS index."""
+        self.model = SentenceTransformer(model_name)
+        self.index_path = index_path
+        self.mapping_path = mapping_path
+        self.ref_folder = ref_folder
+
+        if os.path.exists(self.index_path) and os.path.exists(self.mapping_path):
+            self.index = faiss.read_index(self.index_path)
+            with open(self.mapping_path, "rb") as f:
+                self.mapping = pickle.load(f)
+            print(f"Loaded FAISS index with {len(self.mapping)} passages.")
         else:
-            confidence = 'low'
-        
+            self.index, self.mapping = self.build_index(self.ref_folder)
+            faiss.write_index(self.index, self.index_path)
+            with open(self.mapping_path, "wb") as f:
+                pickle.dump(self.mapping, f)
+            print(f"Built FAISS index with {len(self.mapping)} passages.")
+
+    def build_index(self, folder):
+        """Extract, chunk, embed, and index all reference documents."""
+        texts = []
+        mapping = []
+
+        if not os.path.isdir(folder):
+            print(f"Reference folder '{folder}' not found; creating empty index.")
+            dim = self.model.get_sentence_embedding_dimension()
+            return faiss.IndexFlatIP(dim), []
+
+        for fname in os.listdir(folder):
+            path = os.path.join(folder, fname)
+            try:
+                raw = extract_text_from_file(path)
+            except Exception:
+                continue
+            clean = clean_up_text(raw)
+            words = clean.split()
+
+            stride = 150
+            window = 200
+            for i in range(0, max(len(words) - stride, 1), stride):
+                chunk_words = words[i : i + window]
+                if len(chunk_words) < 50:
+                    continue
+                passage = " ".join(chunk_words)
+                texts.append(passage)
+                mapping.append((fname, passage))
+
+        if not texts:
+            print("No passages extracted; index remains empty.")
+            dim = self.model.get_sentence_embedding_dimension()
+            return faiss.IndexFlatIP(dim), []
+
+        # Single-process embedding
+        embeddings = self.model.encode(
+            texts,
+            convert_to_numpy=True,
+            show_progress_bar=True,
+            batch_size=32,
+            device="cpu",
+            normalize_embeddings=True,
+            num_workers=0
+        )
+        faiss.normalize_L2(embeddings)
+
+        dim = embeddings.shape[1]
+        index = faiss.IndexFlatIP(dim)
+        index.add(embeddings)
+
+        return index, mapping
+
+    def check_for_plagiarism(self, submitted_text, threshold=0.6, top_k=5):
+        """
+        Check a submitted text for similarity against reference corpus.
+        Returns an overall score and detailed matches.
+        """
+        clean = clean_up_text(submitted_text)
+        words = clean.split()
+
+        if len(words) < 50 or not hasattr(self, "index"):
+            return {
+                "overall_score": 0.0,
+                "confidence": "low",
+                "suspicious_parts": [],
+                "message": "No reference corpus available or text too short"
+            }
+
+        stride = 150
+        window = 200
+        chunks = []
+        for i in range(0, max(len(words) - stride, 1), stride):
+            chunk_words = words[i : i + window]
+            if len(chunk_words) >= 50:
+                chunks.append(" ".join(chunk_words))
+
+        if not chunks:
+            return {
+                "overall_score": 0.0,
+                "confidence": "low",
+                "suspicious_parts": [],
+                "message": "Text too short for chunking"
+            }
+
+        embeddings = self.model.encode(
+            chunks,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+            batch_size=32,
+            device="cpu",
+            normalize_embeddings=True,
+            num_workers=0
+        )
+        faiss.normalize_L2(embeddings)
+
+        all_matches = []
+        chunks_with_hits = set()
+
+        for idx, emb in enumerate(embeddings):
+            D, I = self.index.search(emb.reshape(1, -1), top_k)
+            # Debug: log top similarity scores
+            print(f"Chunk {idx} top similarities: {D[0].tolist()}")
+            for score, i_ref in zip(D[0], I[0]):
+                if score >= threshold:
+                    fname, ref_passage = self.mapping[i_ref]
+                    all_matches.append({
+                        "submitted_chunk": chunks[idx],
+                        "reference_file": fname,
+                        "reference_chunk": ref_passage,
+                        "similarity": round(float(score), 3)
+                    })
+                    chunks_with_hits.add(idx)
+
+        overall = 100.0 * (len(chunks_with_hits) / len(chunks))
+        confidence = "high" if overall > 80 else "medium" if overall > 50 else "low"
+
         return {
-            'overall_score': round(max_similarity, 1),
-            'confidence': confidence,
-            'suspicious_parts': all_suspicious_parts,
-            'message': f'Compared against {len(self.reference_texts)} reference texts'
+            "overall_score": round(overall, 1),
+            "confidence": confidence,
+            "suspicious_parts": all_matches,
+            "message": f"Compared against {len(self.mapping)} passages"
         }
