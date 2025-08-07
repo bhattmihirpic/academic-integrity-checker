@@ -24,7 +24,8 @@ packaging==25.0
 pdfminer.six==20231228
 PyMuPDF==1.23.8
 PyMuPDFb==1.23.7
-python-docx==1.1.0
+PyPDF2==3.0.1
+-docx==1.1.0
 python-magic==0.4.27
 PyYAML==6.0.2
 regex==2025.7.34
