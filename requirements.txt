@@ -22,7 +22,7 @@ nltk==3.8.1
 numpy==1.26.4
 packaging==25.0
 pdfminer.six==20231228
-pdf2image#
+pdf2image==1.17.0
 PyMuPDF==1.23.8
 PyMuPDFb==1.23.7
 PyPDF2==3.0.1
