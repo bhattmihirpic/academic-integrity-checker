@@ -23,7 +23,7 @@ class PlagiarismDetector:
     def __init__(
         self,
         ref_folder="reference_texts",
-        semantic_threshold=0.6,
+        semantic_threshold=0.4,
         tfidf_refs=None
     ):
         """

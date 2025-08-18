@@ -13,8 +13,8 @@ class AIDetector:
         stride=50,
         ai_weight=0.7,
         pattern_weight=0.3,
-        high_threshold=80,
-        medium_threshold=60
+        high_threshold=40,
+        medium_threshold=20
     ):
         """
         ai_weight/pattern_weight: weights for smart vs pattern analysis.
