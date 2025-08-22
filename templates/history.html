@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Analysis History{% endblock %}
+{% block title %}Analysis History - Academic Integrity Checker Tool 2.0{% endblock %}
 
 {% block content %}
 <div class="row">
@@ -112,3 +112,4 @@
     </div>
 </div>
 {% endblock %}
+                            <a class="page-link" href="{{ url_for('show_history', page=analyses.prev_num) }}">Previous</a>

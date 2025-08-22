@@ -33,10 +33,10 @@ ai_detective = AIDetector(
     model_name="sentence-transformers/all-MiniLM-L6-v2",
     max_tokens=512,
     stride=50,
-    ai_weight=0.6,
-    pattern_weight=0.4,
-    high_threshold=85,
-    medium_threshold=65
+    ai_weight=0.5,
+    pattern_weight=0.3,
+    high_threshold=50,
+    medium_threshold=30
 )
 print("✅ All detectives are ready!")
 
@@ -163,7 +163,12 @@ def home_page():
         'total_analyses_done': Analysis.query.count()
     }
     return render_template('index.html', form=form, recent_analyses=recent_analyses, system_info=system_info)
-
+@app.route('/history')
+def show_history():
+    page = request.args.get('page', 1, type=int)
+    analyses = Analysis.query.order_by(Analysis.timestamp.desc()) \
+        .paginate(page=page, per_page=20, error_out=False)
+    return render_template('history.html', analyses=analyses)
 @app.route('/results/<analysis_id>')
 def show_results(analysis_id):
     analysis = Analysis.query.filter_by(analysis_id=analysis_id).first_or_404()
@@ -177,12 +182,7 @@ def show_results(analysis_id):
                            ai_result=ai_result,
                            text_stats=text_stats)
 
-@app.route('/history')
-def show_history():
-    page = request.args.get('page', 1, type=int)
-    analyses = Analysis.query.order_by(Analysis.timestamp.desc()) \
-        .paginate(page=page, per_page=20, error_out=False)
-    return render_template('history.html', analyses=analyses)
+
 
 @app.route('/about')
 def about_page():
