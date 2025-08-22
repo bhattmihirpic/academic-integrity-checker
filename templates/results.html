@@ -82,8 +82,8 @@
             
             <!-- AI detection score card -->
             <div class="col-md-6">
-                <div class="card analysis-card border-info">
-                    <div class="card-header bg-info text-white">
+                <div class="card analysis-card border-dark">
+                    <div class="card-header bg-dark text-white">
                         <h5 class="mb-0">
                             <i class="fas fa-robot me-2"></i>AI Content Detection
                         </h5>
@@ -216,9 +216,9 @@
                 </h5>
             </div>
             <div class="card-body">
-                <div class="bg-light p-3 rounded" style="max-height: 400px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.4;">
-                        {{ analysis.original_text }}
-                </div>
+                <pre class="bg-light p-3 rounded" style="max-height: 400px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.4; white-space: pre-wrap;">
+{{ analysis.original_text | e }}
+                </pre>
             </div>
         </div>
     </div>

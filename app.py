@@ -57,14 +57,18 @@ class UploadForm(FlaskForm):
         FileAllowed(['txt', 'pdf', 'docx'], 'Only TXT, PDF, and DOCX files are allowed!')
     ])
     assignment_name = StringField('Assignment Name', validators=[DataRequired()], default='My Assignment')
+    subject = StringField('Subject', validators=[DataRequired()], default='Economics')
     submit = SubmitField('Upload & Analyze')
 
 @app.route('/', methods=['GET', 'POST'])
 def home_page():
     form = UploadForm()
+
     if form.validate_on_submit():
         files = request.files.getlist('file')
         assignment_name = form.assignment_name.data.strip()
+        subject = request.form.get('subject', 'Economics')
+        subject_folder = os.path.join('reference_texts', subject)
 
         # Bulk-upload flow
         if len(files) > 1:
@@ -96,7 +100,9 @@ def home_page():
                     continue
 
                 processed = clean_up_text(text)
-                plag_score = plagiarism_detective.check_for_plagiarism(processed)['overall_score']
+                # Use subject-specific reference folder
+                subject_detector = PlagiarismDetector(ref_folder=subject_folder, semantic_threshold=0.5)
+                plag_score = subject_detector.check_for_plagiarism(processed)['overall_score']
                 ai_score = ai_detective.detect_ai_content(processed)['ai_probability']
 
                 record = Analysis(
@@ -133,7 +139,8 @@ def home_page():
 
             processed_text = clean_up_text(original_text)
             print("🕵️ Starting plagiarism analysis...")
-            plagiarism_result = plagiarism_detective.check_for_plagiarism(processed_text)
+            subject_detector = PlagiarismDetector(ref_folder=subject_folder, semantic_threshold=0.5)
+            plagiarism_result = subject_detector.check_for_plagiarism(processed_text)
             print("🤖 Starting AI detection...")
             ai_result = ai_detective.detect_ai_content(processed_text)
 
