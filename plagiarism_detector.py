@@ -41,9 +41,11 @@ class PlagiarismDetector:
 
         # Build or load semantic index
         self.model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-        self.index_path = "plag_index.faiss"
-        self.mapping_path = "mapping.pkl"
         self.ref_folder = ref_folder
+        # Use subject-specific index and mapping files
+        safe_folder = os.path.basename(os.path.normpath(ref_folder))
+        self.index_path = f"plag_index_{safe_folder}.faiss"
+        self.mapping_path = f"mapping_{safe_folder}.pkl"
 
         if os.path.exists(self.index_path) and os.path.exists(self.mapping_path):
             self.index = faiss.read_index(self.index_path)
@@ -60,16 +62,24 @@ class PlagiarismDetector:
         if os.path.isdir(folder):
             for fn in os.listdir(folder):
                 path = os.path.join(folder, fn)
-                try: raw = extract_text_from_file(path)
-                except: continue
+                print(f"[DEBUG] Processing file: {fn}")
+                try:
+                    raw = extract_text_from_file(path)
+                except Exception as e:
+                    print(f"[DEBUG] Extraction failed for {fn}: {e}")
+                    continue
                 clean = clean_up_text(raw)
                 words = clean.split()
+                print(f"[DEBUG] {fn}: {len(words)} words extracted after cleanup.")
+                chunked = 0
                 for i in range(0, max(len(words)-150,1), 150):
                     chunk = words[i:i+200]
-                    if len(chunk)>=50:
+                    if len(chunk) >= 50:
                         txt = " ".join(chunk)
                         texts.append(txt)
                         mapping.append((fn, txt))
+                        chunked += 1
+                print(f"[DEBUG] {fn}: {chunked} chunks of >=50 words.")
         if not texts:
             dim = self.model.get_sentence_embedding_dimension()
             return faiss.IndexFlatIP(dim), []
