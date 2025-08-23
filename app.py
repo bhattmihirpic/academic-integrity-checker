@@ -68,9 +68,9 @@ def home_page():
         files = request.files.getlist('file')
         assignment_name = form.assignment_name.data.strip()
         subject = request.form.get('subject', 'Economics')
-    subject_folder = os.path.join('reference_texts', subject)
-    uploads_folder = os.path.join(subject_folder, 'uploads')
-    os.makedirs(uploads_folder, exist_ok=True)
+        subject_folder = os.path.join('reference_texts', subject)
+        uploads_folder = os.path.join(subject_folder, 'uploads')
+        os.makedirs(uploads_folder, exist_ok=True)
 
 
         # Bulk-upload flow
