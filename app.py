@@ -68,7 +68,10 @@ def home_page():
         files = request.files.getlist('file')
         assignment_name = form.assignment_name.data.strip()
         subject = request.form.get('subject', 'Economics')
-        subject_folder = os.path.join('reference_texts', subject)
+    subject_folder = os.path.join('reference_texts', subject)
+    uploads_folder = os.path.join(subject_folder, 'uploads')
+    os.makedirs(uploads_folder, exist_ok=True)
+
 
         # Bulk-upload flow
         if len(files) > 1:
@@ -90,7 +93,7 @@ def home_page():
                     continue
 
                 unique = f"{name}_{uuid.uuid4().hex[:8]}{ext}"
-                path = os.path.join(current_app.config['UPLOAD_FOLDER'], unique)
+                path = os.path.join(uploads_folder, unique)
                 f.save(path)
 
                 text = extract_text_from_file(path)
@@ -114,7 +117,7 @@ def home_page():
                 )
                 db.session.add(record)
                 uploaded.append(filename)
-                os.remove(path)
+                # Do not delete uploaded file
 
             db.session.commit()
             flash(f'Bulk upload complete: {len(uploaded)} succeeded, {len(rejected)} rejected.', 'success')
@@ -128,7 +131,7 @@ def home_page():
             filename = secure_filename(f.filename)
             name, ext = os.path.splitext(filename)
             unique_filename = f"{name}_{uuid.uuid4().hex[:8]}{ext}"
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+            filepath = os.path.join(uploads_folder, unique_filename)
             f.save(filepath)
 
             original_text = extract_text_from_file(filepath)
@@ -153,7 +156,7 @@ def home_page():
             )
             db.session.add(analysis)
             db.session.commit()
-            os.remove(filepath)
+            # Do not delete uploaded file
 
             flash('Analysis completed successfully!', 'success')
             return redirect(url_for('show_results', analysis_id=analysis.analysis_id))

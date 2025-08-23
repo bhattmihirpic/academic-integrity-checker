@@ -59,27 +59,43 @@ class PlagiarismDetector:
 
     def build_index(self, folder):
         texts, mapping = [], []
+        # Collect files from both the main folder and uploads subfolder
+        file_paths = []
         if os.path.isdir(folder):
             for fn in os.listdir(folder):
                 path = os.path.join(folder, fn)
-                print(f"[DEBUG] Processing file: {fn}")
-                try:
-                    raw = extract_text_from_file(path)
-                except Exception as e:
-                    print(f"[DEBUG] Extraction failed for {fn}: {e}")
-                    continue
-                clean = clean_up_text(raw)
-                words = clean.split()
-                print(f"[DEBUG] {fn}: {len(words)} words extracted after cleanup.")
-                chunked = 0
-                for i in range(0, max(len(words)-150,1), 150):
-                    chunk = words[i:i+200]
-                    if len(chunk) >= 50:
-                        txt = " ".join(chunk)
-                        texts.append(txt)
-                        mapping.append((fn, txt))
-                        chunked += 1
-                print(f"[DEBUG] {fn}: {chunked} chunks of >=50 words.")
+                if os.path.isfile(path):
+                    file_paths.append(path)
+                elif os.path.isdir(path) and fn == 'uploads':
+                    for upfn in os.listdir(path):
+                        uppath = os.path.join(path, upfn)
+                        if os.path.isfile(uppath):
+                            file_paths.append(uppath)
+        # Track processed files to avoid re-chunking
+        processed_files = set()
+        for path in file_paths:
+            fn = os.path.basename(path)
+            if fn in processed_files:
+                continue
+            processed_files.add(fn)
+            print(f"[DEBUG] Processing file: {fn}")
+            try:
+                raw = extract_text_from_file(path)
+            except Exception as e:
+                print(f"[DEBUG] Extraction failed for {fn}: {e}")
+                continue
+            clean = clean_up_text(raw)
+            words = clean.split()
+            print(f"[DEBUG] {fn}: {len(words)} words extracted after cleanup.")
+            chunked = 0
+            for i in range(0, max(len(words)-150,1), 150):
+                chunk = words[i:i+200]
+                if len(chunk) >= 50:
+                    txt = " ".join(chunk)
+                    texts.append(txt)
+                    mapping.append((fn, txt))
+                    chunked += 1
+            print(f"[DEBUG] {fn}: {chunked} chunks of >=50 words.")
         if not texts:
             dim = self.model.get_sentence_embedding_dimension()
             return faiss.IndexFlatIP(dim), []
