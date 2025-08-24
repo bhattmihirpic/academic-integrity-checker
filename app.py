@@ -11,7 +11,7 @@ from wtforms.validators import DataRequired
 from werkzeug.utils import secure_filename
 
 # Import our custom detectors
-from text_processor import extract_text_from_file, clean_up_text, get_text_info
+from text_processor import extract_text_from_file_storage, clean_up_text, get_text_info
 from plagiarism_detector import PlagiarismDetector
 from ai_detector import AIDetector
 
@@ -69,102 +69,46 @@ def home_page():
         assignment_name = form.assignment_name.data.strip()
         subject = request.form.get('subject', 'Economics')
         subject_folder = os.path.join('reference_texts', subject)
-        uploads_folder = os.path.join(subject_folder, 'uploads')
-        os.makedirs(uploads_folder, exist_ok=True)
 
+        if len(files) != 1:
+            flash('Please upload exactly one file.', 'error')
+            return redirect(url_for('home_page'))
 
-        # Bulk-upload flow
-        if len(files) > 1:
-            uploaded, rejected = [], []
-            for f in files[:150]:
-                raw_name = f.filename or ''
-                filename = secure_filename(raw_name)
-                reason = None
-
-                if not filename:
-                    reason = 'invalid filename'
-                else:
-                    name, ext = os.path.splitext(filename.lower())
-                    if ext not in {'.pdf', '.docx', '.txt'}:
-                        reason = 'unsupported file type'
-
-                if reason:
-                    rejected.append(f"{raw_name} ({reason})")
-                    continue
-
-                unique = f"{name}_{uuid.uuid4().hex[:8]}{ext}"
-                path = os.path.join(uploads_folder, unique)
-                f.save(path)
-
-                text = extract_text_from_file(path)
-                if len(text.strip()) < 100:
-                    rejected.append(f"{filename} (content too short)")
-                    os.remove(path)
-                    continue
-
-                processed = clean_up_text(text)
-                # Use subject-specific reference folder
-                subject_detector = PlagiarismDetector(ref_folder=subject_folder, semantic_threshold=0.5)
-                plag_score = subject_detector.check_for_plagiarism(processed)['overall_score']
-                ai_score = ai_detective.detect_ai_content(processed)['ai_probability']
-
-                record = Analysis(
-                    filename=filename,
-                    assignment_name=assignment_name,
-                    original_text=text,
-                    plagiarism_score=plag_score,
-                    ai_score=ai_score
-                )
-                db.session.add(record)
-                uploaded.append(filename)
-                # Do not delete uploaded file
-
-            db.session.commit()
-            flash(f'Bulk upload complete: {len(uploaded)} succeeded, {len(rejected)} rejected.', 'success')
-            if rejected:
-                flash('Rejected: ' + '; '.join(rejected), 'error')
-            return redirect(url_for('show_history'))
-
-        # Single-file flow
+        f = files[0]
+        filename = secure_filename(f.filename)
+        name, ext = os.path.splitext(filename.lower())
+        
+        if ext not in {'.pdf', '.docx', '.txt'}:
+            flash('Unsupported file type. Please upload PDF, DOCX, or TXT files only.', 'error')
+            return redirect(url_for('home_page'))
+        # Process the file in memory without saving
         try:
-            f = files[0]
-            filename = secure_filename(f.filename)
-            name, ext = os.path.splitext(filename)
-            unique_filename = f"{name}_{uuid.uuid4().hex[:8]}{ext}"
-            filepath = os.path.join(uploads_folder, unique_filename)
-            f.save(filepath)
-
-            original_text = extract_text_from_file(filepath)
-            if len(original_text.strip()) < 100:
+            text = extract_text_from_file_storage(f)
+            if len(text.strip()) < 100:
                 flash('Document too short—please upload at least 100 characters.', 'error')
-                os.remove(filepath)
                 return redirect(url_for('home_page'))
 
-            processed_text = clean_up_text(original_text)
-            print("🕵️ Starting plagiarism analysis...")
+            processed = clean_up_text(text)
+            # Use subject-specific reference folder
             subject_detector = PlagiarismDetector(ref_folder=subject_folder, semantic_threshold=0.5)
-            plagiarism_result = subject_detector.check_for_plagiarism(processed_text)
-            print("🤖 Starting AI detection...")
-            ai_result = ai_detective.detect_ai_content(processed_text)
+            plag_score = subject_detector.check_for_plagiarism(processed)['overall_score']
+            ai_score = ai_detective.detect_ai_content(processed)['ai_probability']
 
-            analysis = Analysis(
+            record = Analysis(
                 filename=filename,
                 assignment_name=assignment_name,
-                original_text=original_text,
-                plagiarism_score=plagiarism_result['overall_score'],
-                ai_score=ai_result['ai_probability']
+                original_text=text,
+                plagiarism_score=plag_score,
+                ai_score=ai_score
             )
-            db.session.add(analysis)
+            db.session.add(record)
             db.session.commit()
-            # Do not delete uploaded file
 
             flash('Analysis completed successfully!', 'success')
-            return redirect(url_for('show_results', analysis_id=analysis.analysis_id))
+            return redirect(url_for('show_results', analysis_id=record.analysis_id))
 
         except Exception as e:
             flash(f'Oops! Something went wrong: {e}', 'error')
-            if 'filepath' in locals() and os.path.exists(filepath):
-                os.remove(filepath)
             return redirect(url_for('home_page'))
 
     recent_analyses = Analysis.query.order_by(Analysis.timestamp.desc()).limit(5).all()
